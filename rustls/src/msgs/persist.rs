@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use core::cmp;
+use core::{cmp, fmt};
 
 use pki_types::{DnsName, UnixTime};
 use zeroize::Zeroizing;
@@ -219,7 +219,7 @@ impl core::ops::Deref for Tls12ClientSessionValue {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ClientSessionCommon {
     ticket: Arc<PayloadU16>,
     secret: Zeroizing<PayloadU8>,
@@ -287,6 +287,28 @@ impl ClientSessionCommon {
 
     pub(crate) fn ticket(&self) -> &[u8] {
         self.ticket.0.as_ref()
+    }
+}
+
+impl fmt::Debug for ClientSessionCommon {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            ticket,
+            secret: _,
+            epoch,
+            lifetime_secs,
+            server_cert_chain,
+            server_cert_verifier,
+            client_creds,
+        } = self;
+        f.debug_struct("ClientSessionCommon")
+            .field("ticket", ticket)
+            .field("epoch", epoch)
+            .field("lifetime_secs", lifetime_secs)
+            .field("server_cert_chain", server_cert_chain)
+            .field("server_cert_verifier", server_cert_verifier)
+            .field("client_creds", client_creds)
+            .finish_non_exhaustive()
     }
 }
 
