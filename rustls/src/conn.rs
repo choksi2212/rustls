@@ -355,18 +355,31 @@ https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
         fn flush(&mut self) -> io::Result<()>;
     }
 
+    impl<T> ConnectionCommon<T> {
+        /// Send or buffer as much of `payload` as possible.
+        ///
+        /// This updates the TLS 1.3 traffic keys as needed between records.
+        fn send_plaintext(&mut self, payload: OutboundChunks<'_>) -> usize {
+            let mut len = 0;
+            loop {
+                len += self
+                    .core
+                    .common_state
+                    .buffer_plaintext(payload.split_at(len).1, &mut self.sendable_plaintext);
+                if !self.core.maybe_refresh_traffic_keys() || len == payload.len() {
+                    return len;
+                }
+            }
+        }
+    }
+
     impl<T> PlaintextSink for ConnectionCommon<T> {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             if let Err(err) = &self.core.state {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, err.clone()));
             }
 
-            let len = self
-                .core
-                .common_state
-                .buffer_plaintext(buf.into(), &mut self.sendable_plaintext);
-            self.core.maybe_refresh_traffic_keys();
-            Ok(len)
+            Ok(self.send_plaintext(buf.into()))
         }
 
         fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
@@ -387,12 +400,7 @@ https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
                     OutboundChunks::new(&payload_owner)
                 }
             };
-            let len = self
-                .core
-                .common_state
-                .buffer_plaintext(payload, &mut self.sendable_plaintext);
-            self.core.maybe_refresh_traffic_keys();
-            Ok(len)
+            Ok(self.send_plaintext(payload))
         }
 
         fn flush(&mut self) -> io::Result<()> {
@@ -1271,14 +1279,14 @@ impl<Data> ConnectionCore<Data> {
     }
 
     /// Trigger a `refresh_traffic_keys` if required by `CommonState`.
-    fn maybe_refresh_traffic_keys(&mut self) {
-        if mem::take(
+    ///
+    /// Returns whether the traffic keys were updated.
+    fn maybe_refresh_traffic_keys(&mut self) -> bool {
+        mem::take(
             &mut self
                 .common_state
                 .refresh_traffic_keys_pending,
-        ) {
-            let _ = self.refresh_traffic_keys();
-        }
+        ) && self.refresh_traffic_keys().is_ok()
     }
 
     fn refresh_traffic_keys(&mut self) -> Result<(), Error> {
